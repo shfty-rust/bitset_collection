@@ -69,15 +69,54 @@ where
     }
 }
 
-impl<'a, C, K> Collection<'a, K> for BitSetCollection<'a, K, C>
+pub struct BitSetCollectionIterator<'a, K, C> {
+    key_iter: BitIter<BitSet>,
+    collection: &'a C,
+    _phantom: PhantomData<&'a K>,
+}
+
+impl<'a, K, C> BitSetCollectionIterator<'a, K, C>
+where
+    C: Collection<'a, K>,
+{
+    pub fn new(collection: &'a BitSetCollection<'a, K, C>) -> Self {
+        let key_iter = collection.bitset.clone().iter();
+        let collection = &collection.collection;
+
+        BitSetCollectionIterator {
+            key_iter,
+            collection,
+            _phantom: Default::default(),
+        }
+    }
+}
+
+impl<'a, K, C> Iterator for BitSetCollectionIterator<'a, K, C>
 where
     C: Collection<'a, K>,
     K: Copy + TryInto<u32> + TryFrom<u32>,
     <K as TryInto<u32>>::Error: Debug,
     <K as TryFrom<u32>>::Error: Debug,
 {
-    type Item = C::Item;
+    type Item = (K, &'a C::Item);
 
+    fn next(&mut self) -> Option<Self::Item> {
+        self.key_iter.next().map(|key| {
+            let key: K = key.try_into().unwrap();
+            (key, self.collection.get_unchecked(&key))
+        })
+    }
+}
+
+impl<'a, C, K> Collection<'a, K> for BitSetCollection<'a, K, C>
+where
+    C: 'a + Collection<'a, K>,
+    K: Copy + TryInto<u32> + TryFrom<u32>,
+    <K as TryInto<u32>>::Error: Debug,
+    <K as TryFrom<u32>>::Error: Debug,
+{
+    type Item = C::Item;
+    type Iter = BitSetCollectionIterator<'a, K, C>;
     type KeyIter = std::iter::Map<BitIter<BitSet>, fn(u32) -> K>;
 
     fn get(&'a self, key: &K) -> Option<&Self::Item> {
@@ -96,6 +135,10 @@ where
     fn remove(&mut self, key: &K) -> Option<Self::Item> {
         self.bitset.remove((*key).try_into().unwrap());
         self.collection.remove(key)
+    }
+
+    fn iter(&'a self) -> Self::Iter {
+        BitSetCollectionIterator::new(&self)
     }
 
     fn keys(&'a self) -> Self::KeyIter {
